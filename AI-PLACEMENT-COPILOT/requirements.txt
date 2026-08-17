@@ -1,0 +1,6 @@
+PyMuPDF
+sentence-transformers
+streamlit
+pydantic
+python-docx
+streamlit-option-menu
