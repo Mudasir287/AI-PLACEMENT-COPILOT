@@ -29,10 +29,14 @@ class InterviewQuestion(BaseModel):
     ideal_answer_points: List[str] = Field(description="Key talking points an interviewer looks for")
 
 
+class InterviewQuestionList(BaseModel):
+    """Container schema allowing Gemini to return multiple interview questions."""
+    questions: List[InterviewQuestion] = Field(description="List of targeted interview questions")
+
+
 class AnswerEvaluation(BaseModel):
     """Evaluation score and actionable feedback for candidate's interview answer."""
     score_out_of_10: float = Field(description="Technical accuracy score from 1.0 to 10.0")
     strengths: List[str] = Field(description="What the candidate explained well")
     missing_concepts: List[str] = Field(description="Key technical concepts left out")
     improved_sample_answer: str = Field(description="An exemplar response to the question")
-
