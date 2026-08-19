@@ -5,13 +5,9 @@ import streamlit as st
 import plotly.graph_objects as go
 from streamlit_option_menu import option_menu
 
-# Internal core modules
+# Core Lightweight Imports
 from auth_view import init_auth_session, render_auth_view, render_user_sidebar
-from database import save_scan_record, get_user_scan_history
-from resume_parser import ResumeParser
-from ats_engine import ATSEngine
-from resume_generator import ResumeGenerator
-from docx_exporter import DocxExporter
+from database import save_scan_record, get_user_scan_history, get_db_connection
 
 # Page Configuration
 st.set_page_config(
@@ -21,7 +17,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom Styling
+# Custom UI Styling
 st.markdown("""
 <style>
     .metric-card {
@@ -53,14 +49,35 @@ st.markdown("""
         margin: 4px;
         border: 1px solid #dc2626;
     }
+    .eval-card {
+        background-color: #0f172a;
+        border: 1px solid #334155;
+        border-radius: 10px;
+        padding: 16px;
+        margin-top: 10px;
+    }
 </style>
 """, unsafe_allow_html=True)
+
+
+def log_interview_session(user_id: int, target_role: str, avg_score: float, q_count: int):
+    """Logs completed mock interview performance into SQLite database."""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO interview_sessions (user_id, target_role, average_score, questions_count)
+            VALUES (?, ?, ?, ?)
+        """, (user_id, target_role, avg_score, q_count))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
 
 
 def render_circular_gauge(score: float, title: str = "ATS Match Score"):
     """Renders an interactive circular gauge chart."""
     color = "#10b981" if score >= 75 else "#f59e0b" if score >= 50 else "#ef4444"
-    
     fig = go.Figure(go.Indicator(
         mode="gauge+number",
         value=score,
@@ -88,8 +105,10 @@ def render_circular_gauge(score: float, title: str = "ATS Match Score"):
     return fig
 
 
+# ==========================================
+# TAB 1: ATS SCANNER & SKILL DIAGNOSTICS
+# ==========================================
 def render_ats_scanner_tab():
-    """Renders Tab 1: Drag-and-Drop ATS Scanner & Analytics."""
     st.subheader("📊 ATS Match Analytics & Skill Diagnosis")
     st.caption("Upload your resume and provide a target job description to compute hybrid match scoring.")
 
@@ -123,6 +142,9 @@ def render_ats_scanner_tab():
                 tmp_path = tmp.name
 
             try:
+                from resume_parser import ResumeParser
+                from ats_engine import ATSEngine
+
                 parser = ResumeParser()
                 parsed_resume = parser.parse(tmp_path)
                 resume_text = parsed_resume["raw_text"]
@@ -199,18 +221,18 @@ def render_ats_scanner_tab():
                 st.success("No critical skill gaps identified!")
 
 
+# ==========================================
+# TAB 2: RESUME OPTIMIZER & DOCX EXPORT
+# ==========================================
 def render_resume_optimizer_tab():
-    """Renders Tab 2: Split-Screen STAR Optimizer & DOCX Exporter."""
     st.subheader("✨ Side-by-Side STAR Resume Optimizer & DOCX Export")
     st.caption("Transform passive resume bullet points into quantified STAR accomplishment statements and export a clean Word document.")
 
-    # Detect scan context from Tab 1 if available
     scan = st.session_state.get("last_scan", {})
     target_role = scan.get("target_role", "Senior UX / UI Designer")
     missing_skills = scan.get("scorecard", {}).get("missing_skills", ["Figma", "Design Systems", "Agile"])
     matched_skills = scan.get("scorecard", {}).get("matched_skills", ["HTML5", "CSS3", "Sketch", "InVision"])
 
-    # Default Raw Bullet Points
     default_raw_bullets = (
         "• Worked on redesigning existing user interfaces for mobile app.\n"
         "• Created wireframes and prototypes for finance platform.\n"
@@ -228,7 +250,6 @@ def render_resume_optimizer_tab():
 
     st.divider()
 
-    # Split-Screen Comparison UI
     col_raw, col_star = st.columns(2, gap="large")
 
     with col_raw:
@@ -245,7 +266,6 @@ def render_resume_optimizer_tab():
 
         optimize_btn = st.button("🪄 Optimize with STAR Framework (Gemini)", type="primary", use_container_width=True)
 
-    # State initialization for optimized output
     if "optimized_bullets" not in st.session_state:
         st.session_state["optimized_bullets"] = [
             "• Spearheaded cross-platform mobile UI redesign using Figma and Design Systems, reducing user abandonment rate by 35%.",
@@ -262,10 +282,9 @@ def render_resume_optimizer_tab():
     if optimize_btn:
         with st.spinner("Invoking Gemini to rewrite bullets using Action Verb + Context + Quantifiable Metric..."):
             try:
+                from resume_generator import ResumeGenerator
                 raw_list = [b.strip("• \t\r") for b in raw_bullets_input.split("\n") if b.strip()]
                 gen = ResumeGenerator()
-                
-                # Check for available generation methods
                 if hasattr(gen, "optimize_bullets"):
                     optimized_bullets = gen.optimize_bullets(raw_list, target_role_input, missing_skills)
                 elif hasattr(gen, "generate_star_bullets"):
@@ -275,7 +294,6 @@ def render_resume_optimizer_tab():
                         f"• Architected {target_role_input} solutions integrating {', '.join(missing_skills[:2])}, improving operational efficiency by 30%.",
                         f"• Led end-to-end execution of user workflows, delivering scalable design patterns that reduced latency by 25%."
                     ]
-                
                 st.session_state["optimized_bullets"] = optimized_bullets
                 st.success("✅ Bullets successfully transformed to STAR format!")
             except Exception as e:
@@ -284,7 +302,6 @@ def render_resume_optimizer_tab():
     with col_star:
         st.markdown("### 🌟 AI-Optimized STAR Bullets (Editable)")
         st.caption("Review and tweak your STAR accomplishments before exporting:")
-        
         editable_bullets_text = st.text_area(
             "Tweak Optimized Bullets",
             value="\n\n".join(st.session_state["optimized_bullets"]),
@@ -293,9 +310,7 @@ def render_resume_optimizer_tab():
 
     st.divider()
 
-    # Section for Professional Summary & DOCX Generation
     st.markdown("### 📄 Review Summary & Export Word Document (.docx)")
-
     col_sum, col_export = st.columns([1.5, 1], gap="large")
 
     with col_sum:
@@ -312,39 +327,17 @@ def render_resume_optimizer_tab():
         final_bullet_list = [b.strip() for b in editable_bullets_text.split("\n") if b.strip()]
         all_skills = list(dict.fromkeys(matched_skills + missing_skills))
 
-        # Generate DOCX Binary in-memory
         try:
+            from docx_exporter import DocxExporter
             exporter = DocxExporter()
-            docx_buffer = io.BytesIO()
-
-            # Handle dynamic method signatures in docx_exporter
-            if hasattr(exporter, "build_resume_docx"):
-                doc_bytes = exporter.build_resume_docx(
-                    name=candidate_name,
-                    contact_info={"email": candidate_email},
-                    summary=summary_text,
-                    skills=all_skills,
-                    experience_bullets=final_bullet_list
-                )
-                docx_buffer = doc_bytes if isinstance(doc_bytes, io.BytesIO) else io.BytesIO(doc_bytes)
-            elif hasattr(exporter, "generate_docx"):
-                doc_bytes = exporter.generate_docx(candidate_name, summary_text, all_skills, final_bullet_list)
-                docx_buffer = doc_bytes if isinstance(doc_bytes, io.BytesIO) else io.BytesIO(doc_bytes)
-            else:
-                # Built-in python-docx document builder
-                from docx import Document
-                doc = Document()
-                doc.add_heading(candidate_name, level=0)
-                doc.add_paragraph(f"Email: {candidate_email} | Target: {target_role_input}")
-                doc.add_heading("Professional Summary", level=1)
-                doc.add_paragraph(summary_text)
-                doc.add_heading("Technical Skills", level=1)
-                doc.add_paragraph(", ".join(all_skills))
-                doc.add_heading("Professional Experience", level=1)
-                for b in final_bullet_list:
-                    doc.add_paragraph(b, style="List Bullet")
-                doc.save(docx_buffer)
-                docx_buffer.seek(0)
+            docx_buffer = exporter.build_resume_docx(
+                name=candidate_name,
+                contact_info={"email": candidate_email},
+                summary=summary_text,
+                skills=all_skills,
+                experience_bullets=final_bullet_list,
+                target_role=target_role_input
+            )
 
             st.download_button(
                 label="📥 Download Tailored Resume (.docx)",
@@ -358,6 +351,184 @@ def render_resume_optimizer_tab():
             st.error(f"Error preparing DOCX export: {e}")
 
 
+# ========================================================
+# TAB 3: CONVERSATIONAL MOCK INTERVIEW CHAT INTERFACE
+# ========================================================
+def render_mock_interview_tab():
+    st.subheader("🎙️ Conversational AI Mock Interviewer")
+    st.caption("Practice answering probing technical questions in a conversational turn-by-turn chat interface with instant scoring feedback.")
+
+    scan = st.session_state.get("last_scan", {})
+    target_role = scan.get("target_role", "Senior UX / UI Designer")
+    missing_skills = scan.get("scorecard", {}).get("missing_skills", ["Figma", "Design Systems", "Agile", "User Research"])
+
+    # Setup Session Control Bar
+    col_role, col_skills, col_btn = st.columns([1.2, 1.8, 1])
+    with col_role:
+        interview_role = st.text_input("Target Role", value=target_role, key="chat_interview_role")
+    with col_skills:
+        skills_to_test = st.text_input(
+            "Skills / Topics Focus",
+            value=", ".join(missing_skills) if missing_skills else "System Design, Architecture",
+            key="chat_interview_skills"
+        )
+    with col_btn:
+        st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+        start_session_btn = st.button("🚀 Start Interview Session", type="primary", use_container_width=True)
+
+    # Initialize Conversational Chat State
+    if "chat_history" not in st.session_state:
+        st.session_state["chat_history"] = []
+    if "interview_active" not in st.session_state:
+        st.session_state["interview_active"] = False
+    if "interview_questions" not in st.session_state:
+        st.session_state["interview_questions"] = []
+    if "current_q_idx" not in st.session_state:
+        st.session_state["current_q_idx"] = 0
+    if "session_scores" not in st.session_state:
+        st.session_state["session_scores"] = []
+
+    # Handle Starting / Restarting Interview Session
+    if start_session_btn:
+        from mock_interviewer import MockInterviewer
+        interviewer = MockInterviewer()
+        with st.spinner("Generating targeted interview questions tailored to your skill gaps..."):
+            skill_list = [s.strip() for s in skills_to_test.split(",") if s.strip()]
+            questions = interviewer.generate_questions(interview_role, skill_list, question_count=3)
+
+            st.session_state["interview_questions"] = questions
+            st.session_state["current_q_idx"] = 0
+            st.session_state["session_scores"] = []
+            st.session_state["interview_active"] = True
+
+            first_q = questions[0]
+            st.session_state["chat_history"] = [
+                {
+                    "role": "assistant",
+                    "type": "greeting",
+                    "content": f"👋 Hello! I am your Technical Hiring Lead for the **{interview_role}** role. Let's begin your technical assessment."
+                },
+                {
+                    "role": "assistant",
+                    "type": "question",
+                    "q_idx": 0,
+                    "question": first_q,
+                    "content": f"**Question 1 (Focus: `{first_q.targeted_skill}` | Difficulty: `{first_q.difficulty}`):**\n\n{first_q.question_text}"
+                }
+            ]
+            st.rerun()
+
+    st.divider()
+
+    # Render Conversational Chat Messages
+    if st.session_state["chat_history"]:
+        for msg in st.session_state["chat_history"]:
+            if msg["role"] == "assistant":
+                with st.chat_message("assistant", avatar="🤖"):
+                    st.markdown(msg["content"])
+
+                    if msg.get("type") == "evaluation":
+                        ev = msg["eval_data"]
+                        score_val = ev.score_out_of_10
+                        score_col = "#10b981" if score_val >= 7.0 else "#f59e0b" if score_val >= 5.0 else "#ef4444"
+
+                        st.markdown(f"""
+                        <div class="eval-card">
+                            <div style="font-size: 1.1rem; font-weight: bold; color: {score_col}; margin-bottom: 8px;">
+                                🎯 Performance Score: {score_val} / 10.0
+                            </div>
+                            <div style="color: #a7f3d0; font-weight: 600;">✅ Key Strengths:</div>
+                            <ul style="margin-top: 4px; margin-bottom: 8px; color: #f1f5f9;">
+                                {"".join([f"<li>{s}</li>" for s in ev.strengths])}
+                            </ul>
+                            <div style="color: #fca5a5; font-weight: 600;">⚠️ Areas for Improvement:</div>
+                            <ul style="margin-top: 4px; margin-bottom: 8px; color: #f1f5f9;">
+                                {"".join([f"<li>{m}</li>" for m in ev.missing_concepts])}
+                            </ul>
+                            <div style="color: #38bdf8; font-weight: 600;">💡 Exemplar Response:</div>
+                            <div style="color: #94a3b8; font-style: italic; margin-top: 4px;">{ev.improved_sample_answer}</div>
+                        </div>
+                        """, unsafe_allow_html=True)
+            else:
+                with st.chat_message("user", avatar="👨‍💻"):
+                    st.markdown(msg["content"])
+
+    # Interactive Answer Input via st.chat_input
+    if st.session_state["interview_active"]:
+        current_idx = st.session_state["current_q_idx"]
+        questions = st.session_state["interview_questions"]
+
+        if current_idx < len(questions):
+            candidate_response = st.chat_input(f"Type your answer for Question {current_idx + 1}...")
+            if candidate_response:
+                current_q = questions[current_idx]
+
+                # 1. Append User Answer
+                st.session_state["chat_history"].append({
+                    "role": "user",
+                    "content": candidate_response
+                })
+
+                # 2. Evaluate with MockInterviewer
+                with st.spinner("AI Interviewer is evaluating technical depth and precision..."):
+                    from mock_interviewer import MockInterviewer
+                    interviewer = MockInterviewer()
+                    eval_result = interviewer.evaluate_candidate_answer(
+                        question=current_q.question_text,
+                        targeted_skill=current_q.targeted_skill,
+                        candidate_answer=candidate_response,
+                        ideal_points=current_q.ideal_answer_points
+                    )
+                    st.session_state["session_scores"].append(eval_result.score_out_of_10)
+
+                    # Append Evaluation to Chat
+                    st.session_state["chat_history"].append({
+                        "role": "assistant",
+                        "type": "evaluation",
+                        "content": f"**Feedback for Question {current_idx + 1}:**",
+                        "eval_data": eval_result
+                    })
+
+                # 3. Advance to next question or complete interview
+                next_idx = current_idx + 1
+                st.session_state["current_q_idx"] = next_idx
+
+                if next_idx < len(questions):
+                    next_q = questions[next_idx]
+                    st.session_state["chat_history"].append({
+                        "role": "assistant",
+                        "type": "question",
+                        "q_idx": next_idx,
+                        "question": next_q,
+                        "content": f"**Question {next_idx + 1} (Focus: `{next_q.targeted_skill}` | Difficulty: `{next_q.difficulty}`):**\n\n{next_q.question_text}"
+                    })
+                else:
+                    st.session_state["interview_active"] = False
+                    avg_score = round(sum(st.session_state["session_scores"]) / len(st.session_state["session_scores"]), 1)
+
+                    if st.session_state.get("user_id"):
+                        log_interview_session(
+                            user_id=st.session_state["user_id"],
+                            target_role=interview_role,
+                            avg_score=avg_score,
+                            q_count=len(questions)
+                        )
+
+                    st.session_state["chat_history"].append({
+                        "role": "assistant",
+                        "type": "completion",
+                        "content": f"🎉 **Interview Complete!** You completed all {len(questions)} questions with an overall average score of **{avg_score} / 10.0**. Your session has been saved to your profile history."
+                    })
+
+                st.rerun()
+    else:
+        if not st.session_state["chat_history"]:
+            st.info("👆 Click **'Start Interview Session'** above to begin your conversational mock interview.")
+
+
+# ==========================================
+# APPLICATION ENTRYPOINT & NAVIGATION
+# ==========================================
 def main():
     init_auth_session()
 
@@ -377,13 +548,13 @@ def main():
         else:
             st.caption("No previous scans recorded.")
 
-    # Horizontal Navigation
+    # Top Navigation Shell
     selected_tab = option_menu(
         menu_title=None,
         options=["ATS Scanner", "Resume Optimizer", "Mock Interview"],
-        icons=["speedometer2", "file-earmark-text", "mic"],
+        icons=["speedometer2", "file-earmark-text", "chat-dots"],
         orientation="horizontal",
-        default_index=1,
+        default_index=0,
         styles={
             "container": {"padding": "0!important", "background-color": "transparent"},
             "icon": {"font-size": "1.05rem"},
@@ -403,7 +574,7 @@ def main():
     elif selected_tab == "Resume Optimizer":
         render_resume_optimizer_tab()
     elif selected_tab == "Mock Interview":
-        st.info("🎙️ **Targeted Mock Interview (Tab 3)** will be integrated in Day 13.")
+        render_mock_interview_tab()
 
 
 if __name__ == "__main__":
