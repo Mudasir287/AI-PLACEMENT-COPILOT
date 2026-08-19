@@ -1,140 +1,119 @@
-import os
-from typing import Dict, List, Any
+import io
+from typing import List, Dict, Optional, Any
 from docx import Document
-from docx.shared import Inches, Pt, RGBColor
+from docx.shared import Pt, Inches, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 
-class DocxResumeExporter:
+class DocxExporter:
     """
-    Generates ATS-optimized Word documents (.docx) following single-column,
-    machine-readable formatting standards.
+    Standardized ATS-compliant Word document (.docx) exporter.
+    Applies clean typography, 0.75-inch margins, and structured headers.
     """
 
     def __init__(self):
-        self.primary_color = RGBColor(30, 41, 59) # Slate dark
-        self.body_color = RGBColor(51, 65, 85) # Charcoal text
-        self.accent_color = RGBColor(15, 23, 42) # Midnight black
+        pass
 
-    def create_resume_document(
+    def build_resume_docx(
         self,
-        candidate_name: str,
-        contact_info: str,
+        name: str,
+        contact_info: Dict[str, Optional[str]],
         summary: str,
         skills: List[str],
-        experience_items: List[Dict[str, Any]],
-        education_items: List[str],
-        output_filepath: str = "tailored_resume.docx"
-    ) -> str:
+        experience_bullets: List[str],
+        target_role: Optional[str] = None
+    ) -> io.BytesIO:
         """
-        Builds and saves an ATS-compliant .docx resume.
+        Builds a professionally styled, ATS-parseable DOCX resume in-memory.
         """
         doc = Document()
 
-        # Set 0.75-inch standard margins
-        sections = doc.sections
-        for section in sections:
+        # Set standard 0.75-inch page margins
+        for section in doc.sections:
             section.top_margin = Inches(0.75)
             section.bottom_margin = Inches(0.75)
             section.left_margin = Inches(0.75)
             section.right_margin = Inches(0.75)
 
-        # 1. Header (Name & Contact)
-        name_para = doc.add_paragraph()
-        name_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        name_run = name_para.add_run(candidate_name)
-        name_run.font.name = "Arial"
-        name_run.font.size = Pt(20)
-        name_run.font.bold = True
-        name_run.font.color.rgb = self.accent_color
+        # Candidate Name (Header)
+        title_p = doc.add_paragraph()
+        title_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        title_run = title_p.add_run(name)
+        title_run.font.name = "Calibri"
+        title_run.font.size = Pt(22)
+        title_run.bold = True
+        title_run.font.color.rgb = RGBColor(15, 23, 42)
 
-        contact_para = doc.add_paragraph()
-        contact_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        contact_run = contact_para.add_run(contact_info)
-        contact_run.font.name = "Arial"
-        contact_run.font.size = Pt(9.5)
-        contact_run.font.color.rgb = self.body_color
+        # Contact Info Line
+        contact_items = [v for v in contact_info.values() if v]
+        if target_role:
+            contact_items.insert(0, target_role)
 
-        # 2. Professional Summary
+        contact_p = doc.add_paragraph()
+        contact_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        contact_run = contact_p.add_run(" | ".join(contact_items))
+        contact_run.font.name = "Calibri"
+        contact_run.font.size = Pt(10)
+        contact_run.font.color.rgb = RGBColor(100, 116, 139)
+
+        # Helper to add standardized section headers
+        def add_section_heading(heading_text: str):
+            p = doc.add_paragraph()
+            p.paragraph_format.space_before = Pt(14)
+            p.paragraph_format.space_after = Pt(4)
+            run = p.add_run(heading_text.upper())
+            run.font.name = "Calibri"
+            run.font.size = Pt(12)
+            run.bold = True
+            run.font.color.rgb = RGBColor(2, 132, 199)
+
+        # 1. Professional Summary
         if summary:
-            self._add_section_heading(doc, "PROFESSIONAL SUMMARY")
-            p = doc.add_paragraph()
-            p_run = p.add_run(summary)
-            p_run.font.name = "Arial"
-            p_run.font.size = Pt(10)
-            p_run.font.color.rgb = self.body_color
+            add_section_heading("Professional Summary")
+            sum_p = doc.add_paragraph()
+            sum_p.paragraph_format.space_after = Pt(6)
+            sum_run = sum_p.add_run(summary)
+            sum_run.font.name = "Calibri"
+            sum_run.font.size = Pt(10.5)
 
-        # 3. Technical Skills
+        # 2. Technical Skills
         if skills:
-            self._add_section_heading(doc, "TECHNICAL SKILLS")
-            p = doc.add_paragraph()
-            p_run = p.add_run(" • ".join(skills))
-            p_run.font.name = "Arial"
-            p_run.font.size = Pt(10)
-            p_run.font.color.rgb = self.body_color
+            add_section_heading("Technical & Core Competencies")
+            skills_p = doc.add_paragraph()
+            skills_p.paragraph_format.space_after = Pt(6)
+            skills_run = skills_p.add_run(" • ".join(skills))
+            skills_run.font.name = "Calibri"
+            skills_run.font.size = Pt(10.5)
 
-        # 4. Work Experience & Optimized STAR Bullets
-        if experience_items:
-            self._add_section_heading(doc, "WORK EXPERIENCE")
-            for item in experience_items:
-                title_para = doc.add_paragraph()
-                title_run = title_para.add_run(f"{item.get('role', 'Role')} | {item.get('company', 'Company')}")
-                title_run.font.name = "Arial"
-                title_run.font.size = Pt(11)
-                title_run.font.bold = True
-                title_run.font.color.rgb = self.accent_color
+        # 3. Professional Experience (STAR Bullets)
+        if experience_bullets:
+            add_section_heading("Professional Experience & Key Achievements")
+            for bullet in experience_bullets:
+                clean_bullet = bullet.strip("• \t\r\n")
+                if not clean_bullet:
+                    continue
+                bullet_p = doc.add_paragraph(style="List Bullet")
+                bullet_p.paragraph_format.space_after = Pt(3)
+                bullet_run = bullet_p.add_run(clean_bullet)
+                bullet_run.font.name = "Calibri"
+                bullet_run.font.size = Pt(10)
 
-                for bullet in item.get("bullets", []):
-                    bullet_para = doc.add_paragraph(style="List Bullet")
-                    b_run = bullet_para.add_run(bullet)
-                    b_run.font.name = "Arial"
-                    b_run.font.size = Pt(10)
-                    b_run.font.color.rgb = self.body_color
+        # Export into BytesIO buffer
+        buffer = io.BytesIO()
+        doc.save(buffer)
+        buffer.seek(0)
+        return buffer
 
-        # 5. Education
-        if education_items:
-            self._add_section_heading(doc, "EDUCATION")
-            for edu in education_items:
-                edu_para = doc.add_paragraph(style="List Bullet")
-                e_run = edu_para.add_run(edu)
-                e_run.font.name = "Arial"
-                e_run.font.size = Pt(10)
-                e_run.font.color.rgb = self.body_color
-
-        doc.save(output_filepath)
-        return os.path.abspath(output_filepath)
-
-    def _add_section_heading(self, doc: Document, title: str):
-        """Creates a standardized ATS section header with border divider."""
-        h = doc.add_paragraph()
-        h.paragraph_format.space_before = Pt(10)
-        h.paragraph_format.space_after = Pt(3)
-        run = h.add_run(title)
-        run.font.name = "Arial"
-        run.font.size = Pt(11.5)
-        run.font.bold = True
-        run.font.color.rgb = self.accent_color
+    def export_resume(self, *args, **kwargs):
+        """Backward-compatibility alias."""
+        return self.build_resume_docx(*args, **kwargs)
 
 
-# --- Verification ---
+# Alias to satisfy both naming conventions across all modules
+DocxResumeExporter = DocxExporter
+
+
+# --- Verification Pipeline ---
 if __name__ == "__main__":
     exporter = DocxResumeExporter()
-    test_path = exporter.create_resume_document(
-        candidate_name="Alex Mercer",
-        contact_info="San Francisco, CA • alex.mercer@email.com • linkedin.com/in/alexmercer • github.com/alexmercer",
-        summary="Results-driven Software Engineer with expertise in building scalable backend services and AI systems.",
-        skills=["Python", "FastAPI", "PyTorch", "Docker", "PostgreSQL", "REST APIs", "Git"],
-        experience_items=[
-            {
-                "role": "AI Backend Engineer",
-                "company": "Tech Innovations Inc.",
-                "bullets": [
-                    "Architected high-throughput document parsing microservice in Python, reducing ingestion latency by 85%.",
-                    "Integrated dense vector embedding search for real-time ATS candidate ranking."
-                ]
-            }
-        ],
-        education_items=["B.S. in Computer Science - University of California, Berkeley (2020 - 2024)"],
-        output_filepath="test_output.docx"
-    )
-    print(f"✅ Generated sample .docx resume at: {test_path}")
+    print("✅ DocxResumeExporter and DocxExporter loaded successfully.")
