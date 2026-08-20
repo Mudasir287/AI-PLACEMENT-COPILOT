@@ -1,24 +1,26 @@
+"""
+database.py
+SQLite database layer with aligned schema columns and auto-migration.
+"""
+
 import sqlite3
 import hashlib
-from typing import Tuple, Optional, List, Dict, Any
+from typing import List, Dict, Any, Optional, Tuple
 
-DB_FILE = "placement_copilot.db"
+DB_NAME = "placement_copilot.db"
 
 
-def get_db_connection() -> sqlite3.Connection:
-    """Returns a thread-safe connection to the SQLite database."""
-    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+def get_db_connection():
+    conn = sqlite3.connect(DB_NAME)
     conn.row_factory = sqlite3.Row
     return conn
 
 
 def hash_password(password: str) -> str:
-    """Computes a secure SHA-256 hash for a given password string."""
     return hashlib.sha256(password.encode("utf-8")).hexdigest()
 
 
-def init_db():
-    """Initializes the required SQLite tables if they do not exist."""
+def init_database():
     conn = get_db_connection()
     cursor = conn.cursor()
 
@@ -29,24 +31,36 @@ def init_db():
             username TEXT UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
+        )
     """)
 
-    # 2. Scans History Table
+    # 2. Scans History Table (Standardized Column Names)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS scans_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
             target_role TEXT NOT NULL,
             overall_score REAL NOT NULL,
-            cosine_similarity REAL NOT NULL,
-            jaccard_similarity REAL NOT NULL,
-            matched_skills_count INTEGER NOT NULL,
-            missing_skills_count INTEGER NOT NULL,
+            cosine_similarity REAL DEFAULT 0.0,
+            jaccard_similarity REAL DEFAULT 0.0,
+            matched_skills_count INTEGER DEFAULT 0,
+            missing_skills_count INTEGER DEFAULT 0,
             timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users (id)
-        );
+        )
     """)
+
+    # Auto-migration check
+    cursor.execute("PRAGMA table_info(scans_history)")
+    cols = {row["name"] for row in cursor.fetchall()}
+    if "cosine_similarity" not in cols and "cosine_sim" in cols:
+        cursor.execute("ALTER TABLE scans_history RENAME COLUMN cosine_sim TO cosine_similarity")
+    if "jaccard_similarity" not in cols and "jaccard_sim" in cols:
+        cursor.execute("ALTER TABLE scans_history RENAME COLUMN jaccard_sim TO jaccard_similarity")
+    if "matched_skills_count" not in cols and "matched_count" in cols:
+        cursor.execute("ALTER TABLE scans_history RENAME COLUMN matched_count TO matched_skills_count")
+    if "missing_skills_count" not in cols and "missing_count" in cols:
+        cursor.execute("ALTER TABLE scans_history RENAME COLUMN missing_count TO missing_skills_count")
 
     # 3. Interview Sessions Table
     cursor.execute("""
@@ -58,7 +72,20 @@ def init_db():
             questions_count INTEGER NOT NULL,
             timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users (id)
-        );
+        )
+    """)
+
+    # 4. Roadmap Task Progress Table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS user_roadmap_progress (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            skill_name TEXT NOT NULL,
+            is_completed INTEGER DEFAULT 0,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, skill_name),
+            FOREIGN KEY (user_id) REFERENCES users (id)
+        )
     """)
 
     conn.commit()
@@ -66,62 +93,51 @@ def init_db():
 
 
 def register_user(username: str, password: str) -> Tuple[bool, str]:
-    """Registers a new user with hashed credentials."""
-    username = username.strip().lower()
-    if not username or not password:
+    if not username.strip() or not password.strip():
         return False, "Username and password cannot be empty."
 
-    hashed = hash_password(password)
     conn = get_db_connection()
     cursor = conn.cursor()
-
     try:
         cursor.execute(
             "INSERT INTO users (username, password_hash) VALUES (?, ?)",
-            (username, hashed)
+            (username.strip(), hash_password(password))
         )
         conn.commit()
-        return True, "Registration successful! You can now log in."
+        return True, "Registration successful!"
     except sqlite3.IntegrityError:
-        return False, "Username already exists. Please pick another one."
+        return False, "Username already exists."
+    except Exception as e:
+        return False, str(e)
     finally:
         conn.close()
 
 
 def verify_user(username: str, password: str) -> Tuple[bool, Optional[int]]:
-    """Validates login credentials against stored hashes."""
-    username = username.strip().lower()
-    hashed = hash_password(password)
     conn = get_db_connection()
     cursor = conn.cursor()
-
     cursor.execute(
-        "SELECT id FROM users WHERE username = ? AND password_hash = ?",
-        (username, hashed)
+        "SELECT id, username, password_hash FROM users WHERE username = ?",
+        (username.strip(),)
     )
     user = cursor.fetchone()
     conn.close()
 
-    if user:
+    if user and user["password_hash"] == hash_password(password):
         return True, user["id"]
     return False, None
 
 
-def save_scan_record(
-    user_id: int,
-    target_role: str,
-    overall_score: float,
-    cosine_sim: float,
-    jaccard_sim: float,
-    matched_count: int,
-    missing_count: int
-):
-    """Logs an ATS scan record into history."""
+def save_scan_record(user_id: int, target_role: str, overall_score: float,
+                     cosine_sim: float, jaccard_sim: float, matched_count: int, missing_count: int):
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("""
-        INSERT INTO scans_history 
-        (user_id, target_role, overall_score, cosine_similarity, jaccard_similarity, matched_skills_count, missing_skills_count)
+        INSERT INTO scans_history (
+            user_id, target_role, overall_score,
+            cosine_similarity, jaccard_similarity,
+            matched_skills_count, missing_skills_count
+        )
         VALUES (?, ?, ?, ?, ?, ?, ?)
     """, (user_id, target_role, overall_score, cosine_sim, jaccard_sim, matched_count, missing_count))
     conn.commit()
@@ -129,39 +145,59 @@ def save_scan_record(
 
 
 def get_user_scan_history(user_id: int) -> List[Dict[str, Any]]:
-    """Retrieves all past scan records for a user."""
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute(
-        "SELECT * FROM scans_history WHERE user_id = ? ORDER BY timestamp DESC",
-        (user_id,)
-    )
-    rows = [dict(row) for row in cursor.fetchall()]
+    cursor.execute("""
+        SELECT target_role, overall_score, cosine_similarity AS cosine_sim,
+               jaccard_similarity AS jaccard_sim, matched_skills_count AS matched_count,
+               missing_skills_count AS missing_count, timestamp
+        FROM scans_history
+        WHERE user_id = ?
+        ORDER BY id DESC
+    """, (user_id,))
+    rows = cursor.fetchall()
     conn.close()
-    return rows
+    return [dict(row) for row in rows]
 
 
-# Initialize database on module load
-init_db()
+def get_user_interview_history(user_id: int) -> List[Dict[str, Any]]:
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT target_role, average_score, questions_count, timestamp
+        FROM interview_sessions
+        WHERE user_id = ?
+        ORDER BY id DESC
+    """, (user_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
 
 
-# --- Day 10 Verification Pipeline ---
-if __name__ == "__main__":
-    print("\n🚀 Initializing and Testing SQLite Database...")
-    init_db()
-    print("✅ Tables 'users', 'scans_history', and 'interview_sessions' verified.")
+def set_roadmap_task_status(user_id: int, skill_name: str, is_completed: bool):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO user_roadmap_progress (user_id, skill_name, is_completed, updated_at)
+        VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(user_id, skill_name) DO UPDATE SET
+            is_completed = excluded.is_completed,
+            updated_at = CURRENT_TIMESTAMP
+    """, (user_id, skill_name, 1 if is_completed else 0))
+    conn.commit()
+    conn.close()
 
-    test_user = "demo_engineer"
-    test_pass = "SecurePass123"
 
-    print(f"\n🔐 Testing user registration for: '{test_user}'")
-    success, msg = register_user(test_user, test_pass)
-    print(f"Result: {msg}")
+def get_user_completed_roadmap_skills(user_id: int) -> List[str]:
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT skill_name FROM user_roadmap_progress
+        WHERE user_id = ? AND is_completed = 1
+    """, (user_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    return [row["skill_name"] for row in rows]
 
-    print("\n🔑 Testing login authentication...")
-    valid, user_id = verify_user(test_user, test_pass)
-    print(f"Auth Success: {valid} (User ID: {user_id})")
 
-    invalid, _ = verify_user(test_user, "WrongPassword")
-    print(f"Auth Reject on bad password: {not invalid}")
-    print("=" * 55)
+init_database()

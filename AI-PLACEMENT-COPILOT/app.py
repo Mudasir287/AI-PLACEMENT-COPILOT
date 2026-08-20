@@ -356,11 +356,11 @@ def render_resume_optimizer_tab():
 # ========================================================
 def render_mock_interview_tab():
     st.subheader("🎙️ Conversational AI Mock Interviewer")
-    st.caption("Practice answering probing technical questions in a conversational turn-by-turn chat interface with instant scoring feedback.")
+    st.caption("Practice answering probing technical questions in a conversational turn-by-turn chat interface.")
 
     scan = st.session_state.get("last_scan", {})
     target_role = scan.get("target_role", "Senior UX / UI Designer")
-    missing_skills = scan.get("scorecard", {}).get("missing_skills", ["Figma", "Design Systems", "Agile", "User Research"])
+    missing_skills = scan.get("scorecard", {}).get("missing_skills", ["Figma", "Design Systems", "Agile"])
 
     # Setup Session Control Bar
     col_role, col_skills, col_btn = st.columns([1.2, 1.8, 1])
@@ -369,7 +369,7 @@ def render_mock_interview_tab():
     with col_skills:
         skills_to_test = st.text_input(
             "Skills / Topics Focus",
-            value=", ".join(missing_skills) if missing_skills else "System Design, Architecture",
+            value=", ".join(missing_skills) if missing_skills else "Core Workflow & Architecture",
             key="chat_interview_skills"
         )
     with col_btn:
@@ -388,13 +388,18 @@ def render_mock_interview_tab():
     if "session_scores" not in st.session_state:
         st.session_state["session_scores"] = []
 
-    # Handle Starting / Restarting Interview Session
+    # Handle Starting a New Session
     if start_session_btn:
         from mock_interviewer import MockInterviewer
         interviewer = MockInterviewer()
-        with st.spinner("Generating targeted interview questions tailored to your skill gaps..."):
+        with st.spinner(f"Generating questions tailored for {interview_role}..."):
             skill_list = [s.strip() for s in skills_to_test.split(",") if s.strip()]
-            questions = interviewer.generate_questions(interview_role, skill_list, question_count=3)
+            questions = interviewer.generate_questions(
+                interview_role,
+                skill_list,
+                3
+            )
+
 
             st.session_state["interview_questions"] = questions
             st.session_state["current_q_idx"] = 0
@@ -406,7 +411,7 @@ def render_mock_interview_tab():
                 {
                     "role": "assistant",
                     "type": "greeting",
-                    "content": f"👋 Hello! I am your Technical Hiring Lead for the **{interview_role}** role. Let's begin your technical assessment."
+                    "content": f"👋 Welcome! I am your Technical Hiring Lead for the **{interview_role}** role. Let's begin the evaluation."
                 },
                 {
                     "role": "assistant",
@@ -420,40 +425,54 @@ def render_mock_interview_tab():
 
     st.divider()
 
-    # Render Conversational Chat Messages
+    # Render Chat History
     if st.session_state["chat_history"]:
         for msg in st.session_state["chat_history"]:
             if msg["role"] == "assistant":
                 with st.chat_message("assistant", avatar="🤖"):
                     st.markdown(msg["content"])
 
+                    
+
+                    # Native Clean Streamlit Evaluation Card (No HTML Leaks)
                     if msg.get("type") == "evaluation":
                         ev = msg["eval_data"]
                         score_val = ev.score_out_of_10
-                        score_col = "#10b981" if score_val >= 7.0 else "#f59e0b" if score_val >= 5.0 else "#ef4444"
 
-                        st.markdown(f"""
-                        <div class="eval-card">
-                            <div style="font-size: 1.1rem; font-weight: bold; color: {score_col}; margin-bottom: 8px;">
-                                🎯 Performance Score: {score_val} / 10.0
-                            </div>
-                            <div style="color: #a7f3d0; font-weight: 600;">✅ Key Strengths:</div>
-                            <ul style="margin-top: 4px; margin-bottom: 8px; color: #f1f5f9;">
-                                {"".join([f"<li>{s}</li>" for s in ev.strengths])}
-                            </ul>
-                            <div style="color: #fca5a5; font-weight: 600;">⚠️ Areas for Improvement:</div>
-                            <ul style="margin-top: 4px; margin-bottom: 8px; color: #f1f5f9;">
-                                {"".join([f"<li>{m}</li>" for m in ev.missing_concepts])}
-                            </ul>
-                            <div style="color: #38bdf8; font-weight: 600;">💡 Exemplar Response:</div>
-                            <div style="color: #94a3b8; font-style: italic; margin-top: 4px;">{ev.improved_sample_answer}</div>
-                        </div>
-                        """, unsafe_allow_html=True)
+                        with st.container():
+                            st.markdown(f"#### 🎯 Evaluation Score: **{score_val} / 10.0**")
+
+                            if score_val >= 7.0:
+                                st.success(f"**Performance Rating:** Strong Response ({score_val}/10.0)")
+                            elif score_val >= 5.0:
+                                st.warning(f"**Performance Rating:** Adequate Response ({score_val}/10.0)")
+                            else:
+                                st.error(f"**Performance Rating:** Needs Improvement ({score_val}/10.0)")
+
+                            col_str, col_miss = st.columns(2)
+                            with col_str:
+                                st.markdown("**✅ Key Strengths:**")
+                                if ev.strengths:
+                                    for s in ev.strengths:
+                                        st.markdown(f"* {s}")
+                                else:
+                                    st.caption("No notable strengths recorded.")
+
+                            with col_miss:
+                                st.markdown("**⚠️ Areas for Improvement:**")
+                                if ev.missing_concepts:
+                                    for m in ev.missing_concepts:
+                                        st.markdown(f"* {m}")
+                                else:
+                                    st.caption("No missing concepts.")
+
+                            st.markdown("**💡 Exemplar Response:**")
+                            st.info(ev.improved_sample_answer)
             else:
                 with st.chat_message("user", avatar="👨‍💻"):
                     st.markdown(msg["content"])
 
-    # Interactive Answer Input via st.chat_input
+    # Chat Turn Input
     if st.session_state["interview_active"]:
         current_idx = st.session_state["current_q_idx"]
         questions = st.session_state["interview_questions"]
@@ -463,14 +482,12 @@ def render_mock_interview_tab():
             if candidate_response:
                 current_q = questions[current_idx]
 
-                # 1. Append User Answer
                 st.session_state["chat_history"].append({
                     "role": "user",
                     "content": candidate_response
                 })
 
-                # 2. Evaluate with MockInterviewer
-                with st.spinner("AI Interviewer is evaluating technical depth and precision..."):
+                with st.spinner("AI Lead is evaluating your response..."):
                     from mock_interviewer import MockInterviewer
                     interviewer = MockInterviewer()
                     eval_result = interviewer.evaluate_candidate_answer(
@@ -481,7 +498,6 @@ def render_mock_interview_tab():
                     )
                     st.session_state["session_scores"].append(eval_result.score_out_of_10)
 
-                    # Append Evaluation to Chat
                     st.session_state["chat_history"].append({
                         "role": "assistant",
                         "type": "evaluation",
@@ -489,7 +505,6 @@ def render_mock_interview_tab():
                         "eval_data": eval_result
                     })
 
-                # 3. Advance to next question or complete interview
                 next_idx = current_idx + 1
                 st.session_state["current_q_idx"] = next_idx
 
@@ -517,13 +532,10 @@ def render_mock_interview_tab():
                     st.session_state["chat_history"].append({
                         "role": "assistant",
                         "type": "completion",
-                        "content": f"🎉 **Interview Complete!** You completed all {len(questions)} questions with an overall average score of **{avg_score} / 10.0**. Your session has been saved to your profile history."
+                        "content": f"🎉 **Interview Complete!** You completed all {len(questions)} questions with an average score of **{avg_score} / 10.0**."
                     })
 
                 st.rerun()
-    else:
-        if not st.session_state["chat_history"]:
-            st.info("👆 Click **'Start Interview Session'** above to begin your conversational mock interview.")
 
 
 # ==========================================
