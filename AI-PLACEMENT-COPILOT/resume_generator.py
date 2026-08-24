@@ -16,7 +16,7 @@ if api_key:
 
 
 class ResumeGenerator:
-    def __init__(self, model_name: str = "gemini-1.5-flash"):
+    def __init__(self, model_name: str = "gemini-pro"):
         self.model_name = model_name
 
     def generate_summary(self, role: str, skills: List[str], experience_years: str = "3+") -> str:
