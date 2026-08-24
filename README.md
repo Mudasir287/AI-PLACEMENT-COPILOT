@@ -40,9 +40,8 @@ Try the live application: **[AI Placement Co-Pilot](https://ai-placement-copilot
 
 ## 🛠️ Architecture & Tech Stack
 
-
+```text
 AI-PLACEMENT-COPILOT/
-│
 ├── app.py # Streamlit UI controller & multi-tab navigation
 ├── ats_scanner.py # SBERT embeddings & hybrid semantic matching
 ├── mock_interviewer.py # Gemini LLM interview generation & evaluation
@@ -50,8 +49,11 @@ AI-PLACEMENT-COPILOT/
 ├── docx_exporter.py # ATS-compliant DOCX document builder
 ├── database.py # SQLite persistence layer & schema migrations
 ├── requirements.txt # Production dependencies
-├── .gitignore # Secrets & environment exclusions
+├── .gitignore # Environment & artifact exclusions
 └── README.md # Project documentation
+```
+
+
 
 * **Frontend**: Streamlit, Streamlit Option Menu, Plotly
 * **AI & NLP**: Google Gemini API (`gemini-1.5-flash`), Sentence-Transformers (`all-MiniLM-L6-v2`), Scikit-Learn
@@ -65,7 +67,7 @@ AI-PLACEMENT-COPILOT/
 
 ### Prerequisites
 * Python 3.10 or 3.11 installed
-* A free Google AI Studio API Key ([Get API Key](https://aistudio.google.com/))
+* Gemini API Key 
 
 ### 1. Clone the Repository
 ```bash
