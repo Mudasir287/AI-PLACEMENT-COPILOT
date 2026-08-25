@@ -34,7 +34,7 @@ class AnswerEvaluation(BaseModel):
 
 
 class MockInterviewer:
-    def __init__(self, model_name: str = "gemini-3.5-flash"):
+    def __init__(self, model_name: str = "gemini-3.5-flash-lite"):
         self.model_name = model_name
 
     def generate_questions(self, *args, **kwargs) -> List[InterviewQuestion]:
